@@ -238,12 +238,13 @@ const ITEM_NAME = Object.fromEntries(ITEMS);
 const $ = id => document.getElementById(id);
 
 /* ---------- state ---------- */
-const DEFAULTS = { gasUrl:"", session:"", ta:"", pts:1, coatOn:true, glovesOn:true, gogglesOn:true,
+const DEFAULTS = { gasUrl:"https://script.google.com/macros/s/AKfycbwokqPxSL8Sfk-VYI8wWHiAflf15XN12oV86T0b4LUmL2QfSldyd_HG7YNJH95pkay2mQ/exec", session:"", ta:"", pts:1, coatOn:true, glovesOn:true, gogglesOn:true,
   coatRef:{h:0,s:0.06,v:0.85}, coatFrac:0.45, gloveRef:{h:215,s:0.6,v:0.65}, gloveFrac:0.012,
   faceId:true, matchThr:0.5, confirmFrames:4, tmUrl:"" };
 function load(k, d){ try{ const v = JSON.parse(localStorage.getItem(k)); return v ?? d; }catch{ return d; } }
 function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
 const S = Object.assign({}, DEFAULTS, load("ppe.settings", {}));
+if(!S.gasUrl) S.gasUrl = DEFAULTS.gasUrl;
 let roster = load("ppe.roster", []);      // {id,name,desc:[128]|null}
 let log = load("ppe.log", []);            // confirmed deductions
 let tickets = [];                         // pending, in memory only (they hold snapshots)
