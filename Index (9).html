@@ -187,8 +187,9 @@ td.num,th.num{text-align:right}
     <div class="form">
       <label>Points deducted per missing item<input type="number" id="pts" min="0" step="0.25"></label>
       <label>TA / grader name<input id="ta" placeholder="Your name"></label>
+      <label>Google Apps Script web app URL<input id="gasUrl" placeholder="https://script.google.com/macros/s/…/exec"></label>
     </div>
-    <div class="row"><button class="btn small" id="btnTestGas">Test Sheet connection</button><span class="muted small" id="gasMsg">Deductions are written to the PPE_Log tab of your Google Sheet.</span></div>
+    <div class="row"><button class="btn small" id="btnTestGas">Test connection</button><span class="muted small" id="gasMsg">Leave empty to keep everything on this device (CSV export still works).</span></div>
   </div>
 
   <div class="panel" style="margin-top:16px">
@@ -251,7 +252,6 @@ let running = false, stream = null, tmModel = null, tmLabels = [], enrollId = nu
 const saveSettings = () => save("ppe.settings", S);
 const saveRoster = () => save("ppe.roster", roster);
 const saveLog = () => save("ppe.log", log);
-const ONLINE = typeof google!=="undefined" && !!(google.script && google.script.run);
 
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true, 2600); }
 function setStatus(text, cls){ $("status").className="chip "+(cls||""); $("statusText").textContent=text; }
@@ -450,7 +450,7 @@ $("tickets").addEventListener("click", e=>{
     if(!st){ toast("Choose the student first"); return; }
     if(!t.items.length){ toast("Tick at least one missing item"); return; }
     if(t.remember && !st.desc){ st.desc=t.desc; saveRoster(); renderRoster(); pushEnroll(st); }
-    const entry={ logId:"L"+Date.now()+Math.random().toString(36).slice(2,6), time:t.time, session:S.session, sid:st.id, name:st.name, items:t.items, pts:t.pts, ta:S.ta, sync: ONLINE? "sending":"local" };
+    const entry={ logId:"L"+Date.now()+Math.random().toString(36).slice(2,6), time:t.time, session:S.session, sid:st.id, name:st.name, items:t.items, pts:t.pts, ta:S.ta, sync: S.gasUrl? "sending":"local" };
     log.unshift(entry); saveLog(); renderLog(); pushLog(entry);
     const tr=tracks.get(t.trackKey); if(tr){ tr.sid=st.id; }
   }
@@ -471,7 +471,7 @@ $("logBody").addEventListener("click", e=>{
   const u=e.target.dataset.undo, r=e.target.dataset.retry;
   if(r){ const l=log.find(x=>x.logId===r); l.sync="sending"; renderLog(); pushLog(l); }
   if(u){ const l=log.find(x=>x.logId===u); log=log.filter(x=>x!==l); saveLog(); renderLog();
-    if(ONLINE && l.sync==="saved") gs("undoDeduction", l.logId).catch(()=>toast("Could not remove the row from the Sheet")); toast("Deduction removed"); }
+    if(S.gasUrl && l.sync==="saved") post({action:"undo", logId:l.logId}); toast("Deduction removed"); }
 });
 $("btnClearLog").onclick=()=>{ if($("btnClearLog").dataset.arm){ log=log.filter(l=>l.session!==S.session); saveLog(); renderLog(); delete $("btnClearLog").dataset.arm; $("btnClearLog").textContent="Clear session log"; }
   else { $("btnClearLog").dataset.arm=1; $("btnClearLog").textContent="Press again to clear (Sheet rows stay)"; setTimeout(()=>{ delete $("btnClearLog").dataset.arm; $("btnClearLog").textContent="Clear session log"; },4000); } };
@@ -482,30 +482,33 @@ $("btnCsv").onclick=()=>{
 };
 
 /* ---------- Google Apps Script link (JSONP GET, no-cors POST, verify by polling) ---------- */
-/* The page is served by Apps Script, so it talks to the Sheet directly through google.script.run. */
-function gs(fn, ...args){ return new Promise((res,rej)=>{
-  if(!ONLINE) return rej(new Error("Open the page from its Google web app link"));
-  google.script.run.withSuccessHandler(res).withFailureHandler(rej)[fn](...args); }); }
+function jsonp(params){ return new Promise((res,rej)=>{
+  const cb="ppecb"+Date.now()+Math.floor(Math.random()*1e4), s=document.createElement("script");
+  const done=()=>{ delete window[cb]; s.remove(); clearTimeout(tm); };
+  const tm=setTimeout(()=>{ done(); rej(new Error("No answer from the Sheet")); }, 12000);
+  window[cb]=d=>{ done(); res(d); }; s.onerror=()=>{ done(); rej(new Error("Could not reach the web app URL")); };
+  s.src=S.gasUrl+"?"+new URLSearchParams({...params, callback:cb}); document.head.append(s); }); }
+function post(params){ return fetch(S.gasUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(params)}); }
 async function pushLog(l){
-  if(!ONLINE) return;
+  if(!S.gasUrl) return;
   try{
-    const r=await gs("logDeduction", {logId:l.logId, time:l.time, session:l.session, sid:l.sid, name:l.name, items:l.items.map(k=>ITEM_NAME[k]||k).join("; "), pts:l.pts, ta:l.ta});
-    l.sync= r && r.ok? "saved":"failed";
+    await post({action:"log", logId:l.logId, time:l.time, session:l.session, sid:l.sid, name:l.name, items:l.items.map(k=>ITEM_NAME[k]||k).join("; "), pts:l.pts, ta:l.ta});
+    let ok=false; for(let i=0;i<4 && !ok;i++){ await new Promise(r=>setTimeout(r,1200)); ok=(await jsonp({action:"verify", logId:l.logId})).found; }
+    l.sync= ok? "saved":"failed";
   }catch{ l.sync="failed"; }
   saveLog(); renderLog();
 }
-function pushEnroll(st){ if(ONLINE) gs("enrollStudent", {sid:st.id, name:st.name, desc: st.desc? JSON.stringify(st.desc.map(n=>+n.toFixed(4))) : ""}).catch(()=>{}); }
-function removeRemote(id){ if(ONLINE) gs("removeStudent", id).catch(()=>{}); }
-async function pullRoster(quiet){
-  if(!ONLINE){ if(quiet!==true) toast("Open the page from its Google web app link"); return; }
-  try{ const d=await gs("getRoster");
+function pushEnroll(st){ if(S.gasUrl) post({action:"enroll", sid:st.id, name:st.name, desc: st.desc? JSON.stringify(st.desc.map(n=>+n.toFixed(4))) : ""}).catch(()=>{}); }
+async function pullRoster(){
+  if(!S.gasUrl){ toast("Add the web app URL in Settings first"); return; }
+  try{ const d=await jsonp({action:"roster"});
     for(const r of d.roster||[]){ const id=String(r.id).trim(); if(!id) continue; let s=studentById(id);
       if(!s){ s={id,name:r.name,desc:null}; roster.push(s); } s.name=r.name||s.name; if(r.desc && !s.desc) s.desc=r.desc; }
-    saveRoster(); renderRoster(); renderTickets(); if(quiet!==true) toast(`Roster loaded: ${roster.length} students`);
-  }catch(e){ if(quiet!==true) toast(e.message); } }
-$("btnPullRoster").onclick=()=>pullRoster();
-$("btnTestGas").onclick=async()=>{
-  $("gasMsg").textContent="Testing…"; try{ const d=await gs("ping"); $("gasMsg").textContent="Connected to “"+d.sheet+"”."; }catch(e){ $("gasMsg").textContent=e.message+"."; } };
+    saveRoster(); renderRoster(); renderTickets(); toast(`Roster loaded: ${roster.length} students`);
+  }catch(e){ toast(e.message); } }
+$("btnPullRoster").onclick=pullRoster;
+$("btnTestGas").onclick=async()=>{ if(!S.gasUrl){ $("gasMsg").textContent="Paste the web app URL first."; return; }
+  $("gasMsg").textContent="Testing…"; try{ const d=await jsonp({action:"ping"}); $("gasMsg").textContent= d.ok? "Connected to “"+d.sheet+"”." : "Unexpected answer."; }catch(e){ $("gasMsg").textContent=e.message+". Check the URL and that the deployment is shared with “Anyone”."; } };
 
 /* ---------- roster & enrolment ---------- */
 function renderRoster(){
@@ -523,7 +526,7 @@ $("btnBulk").onclick=()=>{ let n=0; $("bulk").value.split(/\n/).forEach(line=>{ 
   saveRoster(); renderRoster(); $("bulk").value=""; toast(n+" students added"); };
 $("rosterBody").addEventListener("click", async e=>{
   const d=e.target.dataset;
-  if(d.del){ roster=roster.filter(s=>s.id!==d.del); saveRoster(); renderRoster(); removeRemote(d.del); }
+  if(d.del){ roster=roster.filter(s=>s.id!==d.del); saveRoster(); renderRoster(); }
   if(d.forget){ const s=studentById(d.forget); s.desc=null; saveRoster(); renderRoster(); pushEnroll(s); }
   if(d.enroll){ enrollId=d.enroll; $("enrollText").textContent="Enrolling "+studentById(enrollId).name+": have them face the camera alone, then press Capture."; $("enrollBanner").hidden=false; showTab("radar"); if(!running) await toggleRadar(); }
 });
@@ -545,7 +548,7 @@ function calibrate(kind){
 $("btnCalCoat").onclick=()=>calibrate("coat"); $("btnCalGlove").onclick=()=>calibrate("glove");
 $("btnLoadTm").onclick=()=>{ S.tmUrl=$("tmUrl").value; saveSettings(); loadTm(); };
 function bindSettings(){
-  const map={pts:"pts",ta:"ta",matchThr:"matchThr",confirmFrames:"confirmFrames",coatFrac:"coatFrac",gloveFrac:"gloveFrac",tmUrl:"tmUrl",session:"session"};
+  const map={pts:"pts",ta:"ta",gasUrl:"gasUrl",matchThr:"matchThr",confirmFrames:"confirmFrames",coatFrac:"coatFrac",gloveFrac:"gloveFrac",tmUrl:"tmUrl",session:"session"};
   for(const [id,k] of Object.entries(map)) $(id).value=S[k];
   $("chkCoat").checked=S.coatOn; $("chkGloves").checked=S.glovesOn; $("chkGoggles").checked=S.gogglesOn; $("faceId").checked=S.faceId;
   $("coatSwatch").style.background=hsvCss(S.coatRef); $("gloveSwatch").style.background=hsvCss(S.gloveRef);
@@ -554,11 +557,11 @@ function bindSettings(){
 function onSetting(id,key,num){ $(id).addEventListener("input",e=>{ const el=e.target;
   S[key]= el.type==="checkbox"? el.checked : num? (parseFloat(el.value)||0) : el.value.trim(); saveSettings();
   if(id==="coatFrac"||id==="gloveFrac") bindSettings(); if(id==="session") renderLog(); }); }
-[["pts","pts",1],["ta","ta"],["matchThr","matchThr",1],["confirmFrames","confirmFrames",1],["coatFrac","coatFrac",1],["gloveFrac","gloveFrac",1],
+[["pts","pts",1],["ta","ta"],["gasUrl","gasUrl"],["matchThr","matchThr",1],["confirmFrames","confirmFrames",1],["coatFrac","coatFrac",1],["gloveFrac","gloveFrac",1],
  ["chkCoat","coatOn"],["chkGloves","glovesOn"],["chkGoggles","gogglesOn"],["faceId","faceId"],["session","session"]].forEach(a=>onSetting(...a));
 
 /* ---------- boot ---------- */
-bindSettings(); renderRoster(); renderTickets(); renderLog(); listCams(); pullRoster(true);
+bindSettings(); renderRoster(); renderTickets(); renderLog(); listCams();
 (async()=>{
   if(!navigator.mediaDevices?.getUserMedia){ setStatus("Open this page over https to use the camera","warn"); return; }
   if(typeof faceapi==="undefined"){ setStatus("Detector could not load. Check the internet connection.","warn"); return; }
