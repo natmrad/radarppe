@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PPE Radar</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: control-room split. Live camera on the left, violation tickets on the right, log underneath. */
+:root{
+  --bg:#f3f5f8; --panel:#ffffff; --ink:#14202e; --muted:#5b6878; --line:#d9dfe7;
+  --blue:#0b5cad;      /* ISO 7010 mandatory-sign blue */
+  --blue-soft:#e3eefb;
+  --bad:#c62828; --bad-soft:#fde8e6;
+  --ok:#1d7a46; --ok-soft:#e2f4ea;
+  --warn:#a15c00; --warn-soft:#fff1d6;
+  --display:"Space Grotesk",system-ui,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0e141b; --panel:#17202b; --ink:#e8edf3; --muted:#9aa7b6; --line:#2b3746;
+    --blue:#5aa5f0; --blue-soft:#17304c; --bad:#ff7b72; --bad-soft:#40201f;
+    --ok:#5fd08f; --ok-soft:#163324; --warn:#f0b24a; --warn-soft:#3a2c10; color-scheme:dark; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--body)}
+[hidden]{display:none!important}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.sign{width:34px;height:34px;border-radius:50%;background:var(--blue);display:grid;place-items:center;flex:none}
+.sign svg{width:20px;height:20px}
+h1{font:700 20px/1 var(--display);margin:0;letter-spacing:-.01em}
+h2{font:600 15px/1.2 var(--display);margin:0}
+nav{display:flex;gap:4px}
+nav button{background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--muted);font:500 14px var(--body);cursor:pointer}
+nav button[aria-selected="true"]{background:var(--blue-soft);color:var(--blue)}
+main{padding:16px 20px 40px;max-width:1400px;margin:0 auto}
+.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)} main{padding-inline:16px}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.spacer{margin-left:auto}
+.stage{position:relative;background:#05080c;border-radius:8px;overflow:hidden;aspect-ratio:16/9}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.stage .idle{position:absolute;inset:0;display:grid;place-items:center;color:#b9c4d0;text-align:center;padding:20px}
+button,select,input,textarea{font:inherit;color:inherit}
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:8px;cursor:pointer;font-weight:500}
+.btn:hover{border-color:var(--blue)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+@media (prefers-color-scheme: dark){.btn.primary{color:#08121d}}
+.btn.danger{color:var(--bad)}
+.btn.small{padding:4px 9px;font-size:13px}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,nav button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+input,select,textarea{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 9px;min-width:0}
+input[type=number]{width:72px}
+input[type=range]{padding:0}
+label{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+label.inline{flex-direction:row;align-items:center;gap:7px;color:var(--ink)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--blue-soft);color:var(--blue)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.bad{background:var(--bad-soft);color:var(--bad)} .chip.warn{background:var(--warn-soft);color:var(--warn)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.live .dot{animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live .dot{animation:none}}
+.muted{color:var(--muted)} .small{font-size:12.5px}
+.tickets{display:flex;flex-direction:column;gap:10px;max-height:560px;overflow:auto}
+.ticket{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;border:1px solid var(--line);border-left:4px solid var(--bad);border-radius:8px;padding:10px}
+.ticket img{width:96px;height:120px;object-fit:cover;border-radius:6px;background:#05080c}
+.ticket .body{display:flex;flex-direction:column;gap:8px;min-width:0}
+.items{display:flex;flex-wrap:wrap;gap:6px}
+.items label{flex-direction:row;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--ink);cursor:pointer}
+.items label:has(input:checked){background:var(--bad-soft);border-color:var(--bad);color:var(--bad);font-weight:600}
+.empty{border:1px dashed var(--line);border-radius:8px;padding:22px;text-align:center;color:var(--muted)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+td.num,th.num{text-align:right}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.swatch{width:26px;height:26px;border-radius:6px;border:1px solid var(--line);flex:none}
+.banner{background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:9px 12px;font-weight:500}
+.note{background:var(--blue-soft);border-radius:8px;padding:10px 12px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:8px;font-weight:500;z-index:10}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="sign" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 10h18v3a4 4 0 0 1-4 4h-1.5L12 14l-3.500 3H7a4 4 0 0 1-4-4z"/></svg></div>
+    <h1>PPE Radar</h1>
+  </div>
+  <span id="status" class="chip"><span class="dot"></span><span id="statusText">Loading detector…</span></span>
+  <nav role="tablist">
+    <button role="tab" data-tab="radar" aria-selected="true">Radar</button>
+    <button role="tab" data-tab="students" aria-selected="false">Students</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  </nav>
+</header>
+
+<main>
+<!-- ================= RADAR ================= -->
+<section id="tab-radar">
+  <div class="grid">
+    <div class="panel">
+      <div class="row">
+        <button id="btnStart" class="btn primary" disabled>Start radar</button>
+        <select id="camSelect" aria-label="Camera"></select>
+        <label class="inline"><span class="muted">Session</span><input id="session" placeholder="CHEM 131 – Lab 4 – Sec B" size="24"></label>
+        <span class="spacer muted small" id="fps"></span>
+      </div>
+      <div id="enrollBanner" class="banner row" hidden>
+        <span id="enrollText"></span>
+        <button id="btnCapture" class="btn small spacer">Capture face</button>
+        <button id="btnCancelEnroll" class="btn small">Cancel</button>
+      </div>
+      <div class="stage">
+        <video id="video" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="idle" id="idle">Point the camera at the lab entrance, then press <b>&nbsp;Start radar</b>.</div>
+      </div>
+      <div class="row small muted" id="legend">
+        <span class="chip ok">Green box: PPE complete</span>
+        <span class="chip bad">Red box: item missing</span>
+        <span class="chip warn">Amber: checking / not visible</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row"><h2>Violations to review</h2><span class="chip bad spacer" id="ticketCount">0</span></div>
+      <div class="muted small">Nothing is deducted until you press Confirm.</div>
+      <div class="tickets" id="tickets"></div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <div class="row">
+      <h2>Confirmed deductions</h2>
+      <span class="spacer"></span>
+      <button class="btn small" id="btnCsv">Export CSV</button>
+      <button class="btn small danger" id="btnClearLog">Clear session log</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Time</th><th>Student ID</th><th>Name</th><th>Missing</th><th class="num">Deduction</th><th>Sheet</th><th></th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="logEmpty">No deductions confirmed in this session yet.</div>
+  </div>
+</section>
+
+<!-- ================= STUDENTS ================= -->
+<section id="tab-students" hidden>
+  <div class="panel">
+    <div class="row">
+      <h2>Roster</h2>
+      <span class="spacer"></span>
+      <button class="btn small" id="btnPullRoster">Load roster from Sheet</button>
+    </div>
+    <div class="note small">A student with an enrolled face is named automatically by the radar. Students without one appear as “Unidentified” and you pick the name on the ticket. Only a numeric face signature is stored, never a photo. Get each student's consent before enrolling.</div>
+    <div class="row">
+      <input id="newId" placeholder="Student ID" size="12">
+      <input id="newName" placeholder="Full name" size="24">
+      <button class="btn" id="btnAdd">Add student</button>
+    </div>
+    <details>
+      <summary class="muted">Paste a whole class list</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <textarea id="bulk" rows="5" placeholder="One student per line:  ID, Name"></textarea>
+        <div><button class="btn small" id="btnBulk">Add all</button></div>
+      </div>
+    </details>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Student ID</th><th>Name</th><th>Face</th><th></th></tr></thead>
+        <tbody id="rosterBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="rosterEmpty">No students yet. Add them above or load them from your Sheet.</div>
+  </div>
+</section>
+
+<!-- ================= SETTINGS ================= -->
+<section id="tab-settings" hidden>
+  <div class="panel">
+    <h2>Grading</h2>
+    <div class="form">
+      <label>Points deducted per missing item<input type="number" id="pts" min="0" step="0.25"></label>
+      <label>TA / grader name<input id="ta" placeholder="Your name"></label>
+      <label>Google Apps Script web app URL<input id="gasUrl" placeholder="https://script.google.com/macros/s/…/exec"></label>
+    </div>
+    <div class="row"><button class="btn small" id="btnTestGas">Test connection</button><span class="muted small" id="gasMsg">Leave empty to keep everything on this device (CSV export still works).</span></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h2>What the camera checks</h2>
+    <div class="row">
+      <label class="inline"><input type="checkbox" id="chkCoat"> Lab coat</label>
+      <span class="swatch" id="coatSwatch"></span>
+      <button class="btn small" id="btnCalCoat">Calibrate coat colour</button>
+      <label class="inline small"><span class="muted">Coverage needed</span><input type="range" id="coatFrac" min="0.15" max="0.8" step="0.05"><span id="coatFracV"></span></label>
+    </div>
+    <div class="row">
+      <label class="inline"><input type="checkbox" id="chkGloves"> Gloves</label>
+      <span class="swatch" id="gloveSwatch"></span>
+      <button class="btn small" id="btnCalGlove">Calibrate glove colour</button>
+      <label class="inline small"><span class="muted">Sensitivity</span><input type="range" id="gloveFrac" min="0.003" max="0.05" step="0.001"><span id="gloveFracV"></span></label>
+    </div>
+    <div class="muted small">To calibrate: start the radar, have one person stand in front of the camera wearing the item (for gloves, hold a gloved hand flat on the chest), then press the button.</div>
+    <div class="row">
+      <label class="inline"><input type="checkbox" id="chkGoggles"> Safety goggles</label>
+      <input id="tmUrl" placeholder="Teachable Machine model link (https://teachablemachine.withgoogle.com/models/…/)" style="flex:1 1 320px">
+      <button class="btn small" id="btnLoadTm">Load model</button>
+      <span class="chip warn" id="tmState">No model: TA ticks goggles by hand</span>
+    </div>
+    <div class="muted small">Goggles are transparent, so they need a small trained model. Train an image model at teachablemachine.withgoogle.com with two classes named exactly <b>goggles</b> and <b>no goggles</b> (about 100 webcam face shots each, in your lab lighting), upload it, and paste the link here.</div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h2>Radar behaviour</h2>
+    <div class="form">
+      <label class="inline"><input type="checkbox" id="faceId"> Name students automatically by face</label>
+      <label>Face match strictness (lower = stricter)<input type="number" id="matchThr" min="0.3" max="0.7" step="0.05"></label>
+      <label>Scans in a row before a ticket is raised<input type="number" id="confirmFrames" min="1" max="15" step="1"></label>
+    </div>
+    <div class="row"><button class="btn small danger" id="btnWipeFaces">Delete all face signatures on this device</button></div>
+  </div>
+</section>
+</main>
+<div id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js"></script>
+<script>
+"use strict";
+const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model/";
+const ITEMS = [["coat","Lab coat"],["goggles","Goggles"],["gloves","Gloves"]];
+const ITEM_NAME = Object.fromEntries(ITEMS);
+const $ = id => document.getElementById(id);
+
+/* ---------- state ---------- */
+const DEFAULTS = { gasUrl:"https://script.google.com/macros/s/AKfycbwokqPxSL8Sfk-VYI8wWHiAflf15XN12oV86T0b4LUmL2QfSldyd_HG7YNJH95pkay2mQ/exec", session:"", ta:"", pts:1, coatOn:true, glovesOn:true, gogglesOn:true,
+  coatRef:{h:0,s:0.06,v:0.85}, coatFrac:0.45, gloveRef:{h:215,s:0.6,v:0.65}, gloveFrac:0.012,
+  faceId:true, matchThr:0.5, confirmFrames:4, tmUrl:"" };
+function load(k, d){ try{ const v = JSON.parse(localStorage.getItem(k)); return v ?? d; }catch{ return d; } }
+function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+const S = Object.assign({}, DEFAULTS, load("ppe.settings", {}));
+if(!S.gasUrl) S.gasUrl = DEFAULTS.gasUrl;
+let roster = load("ppe.roster", []);      // {id,name,desc:[128]|null}
+let log = load("ppe.log", []);            // confirmed deductions
+let tickets = [];                         // pending, in memory only (they hold snapshots)
+const tracks = new Map();                 // people currently in view
+let running = false, stream = null, tmModel = null, tmLabels = [], enrollId = null, lastDetections = [];
+const saveSettings = () => save("ppe.settings", S);
+const saveRoster = () => save("ppe.roster", roster);
+const saveLog = () => save("ppe.log", log);
+
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true, 2600); }
+function setStatus(text, cls){ $("status").className="chip "+(cls||""); $("statusText").textContent=text; }
+function esc(s){ const d=document.createElement("div"); d.textContent=s??""; return d.innerHTML; }
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+function showTab(name){
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab===name));
+  for (const t of ["radar","students","settings"]) $("tab-"+t).hidden = t!==name;
+}
+
+/* ---------- colour helpers ---------- */
+function hsv(r,g,b){ r/=255; g/=255; b/=255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn; let h=0;
+  if(d){ if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4; h*=60; if(h<0) h+=360; }
+  return {h, s: mx? d/mx : 0, v: mx}; }
+function hsvCss(c){ const f=n=>{const k=(n+c.h/60)%6; return Math.round(255*(c.v-c.v*c.s*Math.max(0,Math.min(k,4-k,1))));}; return `rgb(${f(5)},${f(3)},${f(1)})`; }
+function matches(p, ref){
+  if (Math.abs(p.v-ref.v) > 0.32) return false;
+  if (ref.s < 0.2) return p.s < 0.25;                    // white / grey reference: only brightness and low saturation matter
+  if (Math.abs(p.s-ref.s) > 0.35 || p.s < 0.2) return false;
+  const dh = Math.abs(p.h-ref.h); return Math.min(dh, 360-dh) < 28;
+}
+const work = document.createElement("canvas"); const wctx = work.getContext("2d", {willReadFrequently:true});
+/* Region of the frame as fractions matching ref; returns null if too little of it is inside the frame. */
+function regionStats(x,y,w,h, refs){
+  const X=Math.max(0,x|0), Y=Math.max(0,y|0), X2=Math.min(work.width,(x+w)|0), Y2=Math.min(work.height,(y+h)|0);
+  if (X2-X < 12 || Y2-Y < 12 || (X2-X)*(Y2-Y) < 0.4*w*h) return null;
+  const d = wctx.getImageData(X,Y,X2-X,Y2-Y).data, step = Math.max(1, Math.round((X2-X)/60)), W=X2-X;
+  let n=0; const hit = refs.map(()=>0); const px=[];
+  for (let yy=0; yy<Y2-Y; yy+=step) for (let xx=0; xx<W; xx+=step){
+    const i=(yy*W+xx)*4, p=hsv(d[i],d[i+1],d[i+2]); n++; px.push(p);
+    refs.forEach((r,k)=>{ if(matches(p,r)) hit[k]++; });
+  }
+  return { frac: hit.map(v=>v/n), px };
+}
+function medianHsv(px){ const m=a=>a.sort((p,q)=>p-q)[a.length>>1];
+  const s=m(px.map(p=>p.s)), v=m(px.map(p=>p.v)); const sat=px.filter(p=>p.s>0.2);
+  let sx=0, sy=0; sat.forEach(p=>{ sx+=Math.cos(p.h*Math.PI/180); sy+=Math.sin(p.h*Math.PI/180); });
+  let h=Math.atan2(sy,sx)*180/Math.PI; if(h<0) h+=360; return {h: sat.length? h:0, s, v}; }
+/* Body zones derived from the face box. */
+function zones(box){ const cx=box.x+box.width/2, fw=box.width, fh=box.height;
+  return { torso:{x:cx-1.1*fw, y:box.y+fh*1.45, w:2.2*fw, h:2.4*fh},
+           body:{x:cx-2.2*fw, y:box.y+fh*1.1, w:4.4*fw, h:5.2*fh},
+           chest:{x:cx-0.5*fw, y:box.y+fh*1.6, w:fw, h:fh} }; }
+
+/* ---------- goggles model (Teachable Machine) ---------- */
+async function loadTm(){
+  let u = S.tmUrl.trim(); if(!u){ tmModel=null; renderTm(); return; }
+  if(!u.endsWith("/")) u+="/";
+  try{
+    $("tmState").textContent="Loading…";
+    tmModel = await faceapi.tf.loadLayersModel(u+"model.json");
+    tmLabels = (await (await fetch(u+"metadata.json")).json()).labels || [];
+    if(!tmLabels.some(l=>/^no\b/i.test(l))) throw new Error('needs a class named "no goggles"');
+  }catch(e){ tmModel=null; toast("Goggles model not loaded: "+e.message); }
+  renderTm();
+}
+function renderTm(){ const el=$("tmState");
+  if(tmModel){ el.className="chip ok"; el.textContent="Model loaded: "+tmLabels.join(" / "); }
+  else { el.className="chip warn"; el.textContent="No model: TA ticks goggles by hand"; } }
+const crop = document.createElement("canvas"); crop.width=crop.height=224; const cctx=crop.getContext("2d");
+function gogglesMissing(box){   // true / false / null (not checked)
+  if(!tmModel) return null;
+  const m=0.25*box.width; cctx.drawImage(work, box.x-m, box.y-m, box.width+2*m, box.height+2*m, 0,0,224,224);
+  const p = faceapi.tf.tidy(()=> tmModel.predict(faceapi.tf.browser.fromPixels(crop).toFloat().div(127.5).sub(1).expandDims(0)).dataSync());
+  let best=0; for(let i=1;i<p.length;i++) if(p[i]>p[best]) best=i;
+  if(p[best] < 0.8) return null;
+  return /^no\b/i.test(tmLabels[best]||"");
+}
+
+/* ---------- camera ---------- */
+async function listCams(){
+  try{ const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");
+    const sel=$("camSelect"), cur=sel.value; sel.innerHTML="";
+    devs.forEach((d,i)=>{ const o=document.createElement("option"); o.value=d.deviceId; o.textContent=d.label||("Camera "+(i+1)); sel.append(o); });
+    if(cur) sel.value=cur; sel.hidden = devs.length<2;
+  }catch{} }
+async function startCam(){
+  const id=$("camSelect").value;
+  stream = await navigator.mediaDevices.getUserMedia({ video:{ deviceId: id?{exact:id}:undefined, width:{ideal:1280}, height:{ideal:720} }, audio:false });
+  const v=$("video"); v.srcObject=stream; await v.play();
+  $("overlay").width=work.width=v.videoWidth; $("overlay").height=work.height=v.videoHeight;
+  $("idle").hidden=true; listCams();
+}
+function stopCam(){ stream?.getTracks().forEach(t=>t.stop()); stream=null; $("video").srcObject=null; $("idle").hidden=false;
+  const o=$("overlay"); o.getContext("2d").clearRect(0,0,o.width,o.height); }
+async function toggleRadar(){
+  if(running){ running=false; stopCam(); tracks.clear(); $("btnStart").textContent="Start radar"; setStatus("Radar stopped",""); $("fps").textContent=""; return; }
+  try{ await startCam(); }catch(e){ toast("Camera not available: "+e.message); return; }
+  running=true; $("btnStart").textContent="Stop radar"; setStatus("Radar live","bad live"); loop();
+}
+$("btnStart").onclick=toggleRadar;
+$("camSelect").onchange=async()=>{ if(running){ stopCam(); try{ await startCam(); }catch(e){ toast(e.message); } } };
+
+/* ---------- the scan loop ---------- */
+function matcher(){ const known=roster.filter(s=>s.desc);
+  if(!S.faceId || !known.length) return null;
+  return new faceapi.FaceMatcher(known.map(s=>new faceapi.LabeledFaceDescriptors(s.id,[new Float32Array(s.desc)])), S.matchThr); }
+function dist(a,b){ let s=0; for(let i=0;i<a.length;i++){ const d=a[i]-b[i]; s+=d*d; } return Math.sqrt(s); }
+let unkSeq=0;
+function trackFor(det, fm){
+  if(fm){ const m=fm.findBestMatch(det.descriptor); if(m.label!=="unknown") return getTrack("id:"+m.label, det, m.label); }
+  for(const [k,t] of tracks) if(k.startsWith("unk:") && dist(t.desc, det.descriptor) < 0.5) return getTrack(k, det, null);
+  return getTrack("unk:"+(++unkSeq), det, null);
+}
+function getTrack(key, det, sid){ let t=tracks.get(key);
+  if(!t){ t={key, sid, miss:{coat:0,goggles:0,gloves:0}, ticketed:new Set()}; tracks.set(key,t); }
+  t.desc=det.descriptor; t.seen=Date.now(); return t; }
+
+async function loop(){
+  const v=$("video"), opts=new faceapi.TinyFaceDetectorOptions({inputSize:416, scoreThreshold:0.45});
+  while(running){
+    const t0=performance.now();
+    try{
+      const dets = await faceapi.detectAllFaces(v, opts).withFaceLandmarks().withFaceDescriptors();
+      if(!running) break;
+      wctx.drawImage(v,0,0,work.width,work.height);
+      lastDetections = dets;
+      const fm=matcher(), ctx=$("overlay").getContext("2d"); ctx.clearRect(0,0,work.width,work.height);
+      for(const det of dets){
+        const box=det.detection.box, z=zones(box), t=trackFor(det,fm);
+        const res={};   // true = missing, false = worn, null = can't tell
+        if(S.coatOn){ const r=regionStats(z.torso.x,z.torso.y,z.torso.w,z.torso.h,[S.coatRef]); res.coat = r? r.frac[0] < S.coatFrac : null; }
+        if(S.glovesOn){ const r=regionStats(z.body.x,z.body.y,z.body.w,z.body.h,[S.gloveRef]); res.gloves = r? r.frac[0] < S.gloveFrac : null; }
+        if(S.gogglesOn) res.goggles = gogglesMissing(box);
+        const missing=[]; let unsure=false;
+        for(const [k] of ITEMS){ if(!(k in res)) continue;
+          if(res[k]===true){ t.miss[k]++; if(t.miss[k]>=S.confirmFrames) missing.push(k); else unsure=true; }
+          else { if(res[k]===false) t.miss[k]=0; else unsure=true; } }
+        const fresh=missing.filter(k=>!t.ticketed.has(k) && !alreadyLogged(t.sid,k));
+        if(fresh.length){ fresh.forEach(k=>t.ticketed.add(k)); raiseTicket(t, fresh, box); }
+        const st=studentById(t.sid), color = missing.length? "#ff4d42" : unsure? "#f0b24a" : "#35c26f";
+        ctx.lineWidth=Math.max(3, work.width/320); ctx.strokeStyle=color; ctx.strokeRect(box.x,box.y,box.width,box.height);
+        ctx.setLineDash([8,6]); ctx.lineWidth=2; ctx.strokeRect(z.torso.x,z.torso.y,z.torso.w,z.torso.h); ctx.setLineDash([]);
+        const text=(st? st.name : "Unidentified")+(missing.length? " · no "+missing.map(k=>ITEM_NAME[k].toLowerCase()).join(", ") : "");
+        const fs=Math.max(16, work.width/55); ctx.font=`600 ${fs}px Inter, sans-serif`;
+        const tw=ctx.measureText(text).width+12; ctx.fillStyle=color; ctx.fillRect(box.x, box.y-fs-8, tw, fs+8);
+        ctx.fillStyle="#08121d"; ctx.fillText(text, box.x+6, box.y-8);
+      }
+      for(const [k,t] of tracks) if(Date.now()-t.seen > 8000 && k.startsWith("unk:")) tracks.delete(k);
+      $("fps").textContent = dets.length+" in view · "+Math.round(performance.now()-t0)+" ms/scan";
+    }catch(e){ console.error(e); }
+    await new Promise(r=>setTimeout(r, 120));
+  }
+}
+const studentById = id => roster.find(s=>s.id===id) || null;
+function alreadyLogged(sid, item){ if(!sid) return false;
+  return log.some(l=>l.sid===sid && l.session===S.session && l.items.includes(item)) || tickets.some(t=>t.sid===sid && t.items.includes(item)); }
+
+/* ---------- tickets ---------- */
+function snapshot(box){ const z=zones(box), c=document.createElement("canvas"); c.width=192; c.height=240;
+  const x=Math.max(0,z.torso.x-0.2*box.width), y=Math.max(0,box.y-0.4*box.height), w=z.torso.w+0.4*box.width, h=w*1.25;
+  c.getContext("2d").drawImage(work, x,y,Math.min(w,work.width-x),Math.min(h,work.height-y), 0,0,192,240); return c.toDataURL("image/jpeg",0.7); }
+function raiseTicket(track, items, box){
+  let t = tickets.find(x=>x.trackKey===track.key);
+  if(t){ items.forEach(i=>{ if(!t.items.includes(i)) t.items.push(i); }); t.pts=S.pts*t.items.length; }
+  else tickets.unshift({ id:"T"+Date.now()+Math.random().toString(36).slice(2,6), time:new Date().toISOString(), trackKey:track.key,
+    sid:track.sid, items:[...items], pts:S.pts*items.length, snap:snapshot(box), desc:Array.from(track.desc), remember:false });
+  renderTickets();
+}
+function renderTickets(){
+  $("ticketCount").textContent=tickets.length;
+  const box=$("tickets");
+  if(!tickets.length){ box.innerHTML='<div class="empty">No open violations. Students missing PPE appear here with a photo as they pass the camera.</div>'; return; }
+  box.innerHTML = tickets.map(t=>`
+    <div class="ticket" data-id="${t.id}">
+      <img src="${t.snap}" alt="Camera capture">
+      <div class="body">
+        <div class="row"><select data-f="sid" aria-label="Student" style="flex:1 1 150px">
+          <option value="">Unidentified – choose student</option>
+          ${roster.map(s=>`<option value="${esc(s.id)}" ${s.id===t.sid?"selected":""}>${esc(s.name)} (${esc(s.id)})</option>`).join("")}
+        </select><span class="muted small">${new Date(t.time).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</span></div>
+        <div class="items">${ITEMS.map(([k,n])=>`<label><input type="checkbox" data-f="item" value="${k}" ${t.items.includes(k)?"checked":""}>No ${n.toLowerCase()}</label>`).join("")}</div>
+        <div class="row">
+          <label class="inline small"><span class="muted">Deduct</span><input type="number" data-f="pts" value="${t.pts}" min="0" step="0.25"></label>
+          ${t.sid && studentById(t.sid)?.desc ? "" : `<label class="inline small"><input type="checkbox" data-f="remember" ${t.remember?"checked":""}>Remember this face</label>`}
+          <button class="btn small primary spacer" data-f="confirm">Confirm</button>
+          <button class="btn small" data-f="dismiss">Dismiss</button>
+        </div>
+      </div>
+    </div>`).join("");
+}
+$("tickets").addEventListener("change", e=>{
+  const card=e.target.closest(".ticket"); if(!card) return; const t=tickets.find(x=>x.id===card.dataset.id), f=e.target.dataset.f;
+  if(f==="sid"){ t.sid=e.target.value||null; renderTickets(); }
+  if(f==="pts") t.pts=parseFloat(e.target.value)||0;
+  if(f==="remember") t.remember=e.target.checked;
+  if(f==="item"){ t.items=[...card.querySelectorAll('[data-f="item"]:checked')].map(i=>i.value); t.pts=S.pts*t.items.length; card.querySelector('[data-f="pts"]').value=t.pts; }
+});
+$("tickets").addEventListener("click", e=>{
+  const f=e.target.dataset.f; if(f!=="confirm" && f!=="dismiss") return;
+  const card=e.target.closest(".ticket"), t=tickets.find(x=>x.id===card.dataset.id);
+  if(f==="confirm"){
+    const st=studentById(t.sid);
+    if(!st){ toast("Choose the student first"); return; }
+    if(!t.items.length){ toast("Tick at least one missing item"); return; }
+    if(t.remember && !st.desc){ st.desc=t.desc; saveRoster(); renderRoster(); pushEnroll(st); }
+    const entry={ logId:"L"+Date.now()+Math.random().toString(36).slice(2,6), time:t.time, session:S.session, sid:st.id, name:st.name, items:t.items, pts:t.pts, ta:S.ta, sync: S.gasUrl? "sending":"local" };
+    log.unshift(entry); saveLog(); renderLog(); pushLog(entry);
+    const tr=tracks.get(t.trackKey); if(tr){ tr.sid=st.id; }
+  }
+  tickets=tickets.filter(x=>x!==t); renderTickets();
+});
+
+/* ---------- log ---------- */
+function renderLog(){
+  const rows=log.filter(l=>l.session===S.session);
+  $("logEmpty").hidden=rows.length>0;
+  $("logBody").innerHTML=rows.map(l=>`<tr>
+    <td>${new Date(l.time).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td><td>${esc(l.sid)}</td><td>${esc(l.name)}</td>
+    <td>${l.items.map(k=>ITEM_NAME[k]||k).join(", ")}</td><td class="num">−${l.pts}</td>
+    <td><span class="chip ${l.sync==="saved"?"ok":l.sync==="failed"?"bad":""}">${{saved:"Saved",failed:"Not saved",sending:"Sending…",local:"This device only"}[l.sync]}</span></td>
+    <td>${l.sync==="failed"?`<button class="btn small" data-retry="${l.logId}">Retry</button>`:""} <button class="btn small danger" data-undo="${l.logId}">Undo</button></td></tr>`).join("");
+}
+$("logBody").addEventListener("click", e=>{
+  const u=e.target.dataset.undo, r=e.target.dataset.retry;
+  if(r){ const l=log.find(x=>x.logId===r); l.sync="sending"; renderLog(); pushLog(l); }
+  if(u){ const l=log.find(x=>x.logId===u); log=log.filter(x=>x!==l); saveLog(); renderLog();
+    if(S.gasUrl && l.sync==="saved") post({action:"undo", logId:l.logId}); toast("Deduction removed"); }
+});
+$("btnClearLog").onclick=()=>{ if($("btnClearLog").dataset.arm){ log=log.filter(l=>l.session!==S.session); saveLog(); renderLog(); delete $("btnClearLog").dataset.arm; $("btnClearLog").textContent="Clear session log"; }
+  else { $("btnClearLog").dataset.arm=1; $("btnClearLog").textContent="Press again to clear (Sheet rows stay)"; setTimeout(()=>{ delete $("btnClearLog").dataset.arm; $("btnClearLog").textContent="Clear session log"; },4000); } };
+$("btnCsv").onclick=()=>{
+  const q=s=>'"'+String(s??"").replace(/"/g,'""')+'"';
+  const csv=["Timestamp,Session,StudentID,Name,MissingItems,Deduction,TA", ...log.map(l=>[l.time,l.session,l.sid,l.name,l.items.map(k=>ITEM_NAME[k]||k).join("; "),-l.pts,l.ta].map(q).join(","))].join("\r\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"})); a.download="ppe-deductions.csv"; a.click();
+};
+
+/* ---------- Google Apps Script link (JSONP GET, no-cors POST, verify by polling) ---------- */
+function jsonp(params){ return new Promise((res,rej)=>{
+  const cb="ppecb"+Date.now()+Math.floor(Math.random()*1e4), s=document.createElement("script");
+  const done=()=>{ delete window[cb]; s.remove(); clearTimeout(tm); };
+  const tm=setTimeout(()=>{ done(); rej(new Error("No answer from the Sheet")); }, 12000);
+  window[cb]=d=>{ done(); res(d); }; s.onerror=()=>{ done(); rej(new Error("Could not reach the web app URL")); };
+  s.src=S.gasUrl+"?"+new URLSearchParams({...params, callback:cb}); document.head.append(s); }); }
+function post(params){ return fetch(S.gasUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(params)}); }
+async function pushLog(l){
+  if(!S.gasUrl) return;
+  try{
+    await post({action:"log", logId:l.logId, time:l.time, session:l.session, sid:l.sid, name:l.name, items:l.items.map(k=>ITEM_NAME[k]||k).join("; "), pts:l.pts, ta:l.ta});
+    let ok=false; for(let i=0;i<4 && !ok;i++){ await new Promise(r=>setTimeout(r,1200)); ok=(await jsonp({action:"verify", logId:l.logId})).found; }
+    l.sync= ok? "saved":"failed";
+  }catch{ l.sync="failed"; }
+  saveLog(); renderLog();
+}
+function pushEnroll(st){ if(S.gasUrl) post({action:"enroll", sid:st.id, name:st.name, desc: st.desc? JSON.stringify(st.desc.map(n=>+n.toFixed(4))) : ""}).catch(()=>{}); }
+async function pullRoster(){
+  if(!S.gasUrl){ toast("Add the web app URL in Settings first"); return; }
+  try{ const d=await jsonp({action:"roster"});
+    for(const r of d.roster||[]){ const id=String(r.id).trim(); if(!id) continue; let s=studentById(id);
+      if(!s){ s={id,name:r.name,desc:null}; roster.push(s); } s.name=r.name||s.name; if(r.desc && !s.desc) s.desc=r.desc; }
+    saveRoster(); renderRoster(); renderTickets(); toast(`Roster loaded: ${roster.length} students`);
+  }catch(e){ toast(e.message); } }
+$("btnPullRoster").onclick=pullRoster;
+$("btnTestGas").onclick=async()=>{ if(!S.gasUrl){ $("gasMsg").textContent="Paste the web app URL first."; return; }
+  $("gasMsg").textContent="Testing…"; try{ const d=await jsonp({action:"ping"}); $("gasMsg").textContent= d.ok? "Connected to “"+d.sheet+"”." : "Unexpected answer."; }catch(e){ $("gasMsg").textContent=e.message+". Check the URL and that the deployment is shared with “Anyone”."; } };
+
+/* ---------- roster & enrolment ---------- */
+function renderRoster(){
+  $("rosterEmpty").hidden=roster.length>0;
+  $("rosterBody").innerHTML=roster.map(s=>`<tr><td>${esc(s.id)}</td><td>${esc(s.name)}</td>
+    <td>${s.desc?'<span class="chip ok">Enrolled</span>':'<span class="chip">Not enrolled</span>'}</td>
+    <td><button class="btn small" data-enroll="${esc(s.id)}">${s.desc?"Re-enroll":"Enroll face"}</button>
+    ${s.desc?`<button class="btn small" data-forget="${esc(s.id)}">Delete face</button>`:""}
+    <button class="btn small danger" data-del="${esc(s.id)}">Remove</button></td></tr>`).join("");
+}
+function addStudent(id,name){ id=String(id||"").trim(); name=String(name||"").trim(); if(!id||!name) return false;
+  if(studentById(id)) return false; const s={id,name,desc:null}; roster.push(s); pushEnroll(s); return true; }
+$("btnAdd").onclick=()=>{ if(addStudent($("newId").value,$("newName").value)){ $("newId").value=$("newName").value=""; saveRoster(); renderRoster(); } else toast("Enter a new ID and a name"); };
+$("btnBulk").onclick=()=>{ let n=0; $("bulk").value.split(/\n/).forEach(line=>{ const m=line.split(/[,\t;]/); if(addStudent(m[0], m.slice(1).join(" "))) n++; });
+  saveRoster(); renderRoster(); $("bulk").value=""; toast(n+" students added"); };
+$("rosterBody").addEventListener("click", async e=>{
+  const d=e.target.dataset;
+  if(d.del){ roster=roster.filter(s=>s.id!==d.del); saveRoster(); renderRoster(); }
+  if(d.forget){ const s=studentById(d.forget); s.desc=null; saveRoster(); renderRoster(); pushEnroll(s); }
+  if(d.enroll){ enrollId=d.enroll; $("enrollText").textContent="Enrolling "+studentById(enrollId).name+": have them face the camera alone, then press Capture."; $("enrollBanner").hidden=false; showTab("radar"); if(!running) await toggleRadar(); }
+});
+$("btnCancelEnroll").onclick=()=>{ enrollId=null; $("enrollBanner").hidden=true; };
+$("btnCapture").onclick=()=>{
+  if(lastDetections.length!==1){ toast(lastDetections.length? "More than one face in view" : "No face in view"); return; }
+  const s=studentById(enrollId); s.desc=Array.from(lastDetections[0].descriptor); saveRoster(); renderRoster(); pushEnroll(s);
+  toast(s.name+" enrolled"); enrollId=null; $("enrollBanner").hidden=true; tracks.clear();
+};
+$("btnWipeFaces").onclick=()=>{ roster.forEach(s=>s.desc=null); saveRoster(); renderRoster(); toast("Face signatures deleted on this device"); };
+
+/* ---------- settings ---------- */
+function calibrate(kind){
+  if(!running || lastDetections.length!==1){ toast("Start the radar with exactly one person in view"); return; }
+  const z=zones(lastDetections[0].detection.box), r = kind==="coat"? z.torso : z.chest, st=regionStats(r.x,r.y,r.w,r.h,[]);
+  if(!st){ toast("Step back: the upper body must be in the picture"); return; }
+  S[kind==="coat"?"coatRef":"gloveRef"]=medianHsv(st.px); saveSettings(); bindSettings(); toast("Colour saved");
+}
+$("btnCalCoat").onclick=()=>calibrate("coat"); $("btnCalGlove").onclick=()=>calibrate("glove");
+$("btnLoadTm").onclick=()=>{ S.tmUrl=$("tmUrl").value; saveSettings(); loadTm(); };
+function bindSettings(){
+  const map={pts:"pts",ta:"ta",gasUrl:"gasUrl",matchThr:"matchThr",confirmFrames:"confirmFrames",coatFrac:"coatFrac",gloveFrac:"gloveFrac",tmUrl:"tmUrl",session:"session"};
+  for(const [id,k] of Object.entries(map)) $(id).value=S[k];
+  $("chkCoat").checked=S.coatOn; $("chkGloves").checked=S.glovesOn; $("chkGoggles").checked=S.gogglesOn; $("faceId").checked=S.faceId;
+  $("coatSwatch").style.background=hsvCss(S.coatRef); $("gloveSwatch").style.background=hsvCss(S.gloveRef);
+  $("coatFracV").textContent=Math.round(S.coatFrac*100)+"%"; $("gloveFracV").textContent=(S.gloveFrac*100).toFixed(1)+"%";
+}
+function onSetting(id,key,num){ $(id).addEventListener("input",e=>{ const el=e.target;
+  S[key]= el.type==="checkbox"? el.checked : num? (parseFloat(el.value)||0) : el.value.trim(); saveSettings();
+  if(id==="coatFrac"||id==="gloveFrac") bindSettings(); if(id==="session") renderLog(); }); }
+[["pts","pts",1],["ta","ta"],["gasUrl","gasUrl"],["matchThr","matchThr",1],["confirmFrames","confirmFrames",1],["coatFrac","coatFrac",1],["gloveFrac","gloveFrac",1],
+ ["chkCoat","coatOn"],["chkGloves","glovesOn"],["chkGoggles","gogglesOn"],["faceId","faceId"],["session","session"]].forEach(a=>onSetting(...a));
+
+/* ---------- boot ---------- */
+bindSettings(); renderRoster(); renderTickets(); renderLog(); listCams();
+(async()=>{
+  if(!navigator.mediaDevices?.getUserMedia){ setStatus("Open this page over https to use the camera","warn"); return; }
+  if(typeof faceapi==="undefined"){ setStatus("Detector could not load. Check the internet connection.","warn"); return; }
+  try{
+    await Promise.all([faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL), faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL), faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)]);
+    setStatus("Ready",""); $("btnStart").disabled=false; if(S.tmUrl) loadTm();
+  }catch(e){ setStatus("Detector could not load. Check the internet connection.","warn"); }
+})();
+</script>
+</body>
+</html>
