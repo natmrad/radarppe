@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Molecule AR</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+<style>
+  :root{--bg:#f6f5f1;--card:#fff;--ink:#1d2330;--muted:#6b7280;--accent:#4f46e5;--lp:#a98cff;--line:#e6e3dc}
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:16px 16px 4px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  h1{margin:0;font-size:1.6rem;letter-spacing:-.01em}
+  .formula{font-size:1.6rem;font-weight:700;color:var(--accent)}
+  .sub{color:var(--muted);font-size:.95rem;width:100%}
+  model-viewer{width:100%;height:58vh;min-height:320px;background:radial-gradient(circle at 50% 40%,#fff,#ebe8e0);--poster-color:transparent}
+  .arbtn{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);background:var(--accent);color:#fff;border:0;border-radius:999px;
+         padding:14px 22px;font-size:1.05rem;font-weight:600;box-shadow:0 6px 18px rgba(79,70,229,.35);display:flex;gap:8px;align-items:center}
+  .hint{position:absolute;top:10px;left:0;right:0;text-align:center;font-size:.8rem;color:var(--muted)}
+  main{padding:14px 16px 32px;max-width:720px;margin:0 auto}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .cell{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .cell b{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin-bottom:3px}
+  .cell span{font-size:1.05rem;font-weight:600}
+  .hidden-ans span{filter:blur(7px);user-select:none}
+  .reveal{margin-top:12px;width:100%;padding:12px;border-radius:12px;border:2px dashed var(--accent);background:transparent;color:var(--accent);font-weight:700;font-size:1rem}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;font-size:.9rem;color:var(--muted)}
+  .dot{display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:-2px;margin-right:5px;border:1px solid rgba(0,0,0,.15)}
+  .noar{margin-top:12px;font-size:.85rem;color:var(--muted)}
+  .arlink{display:block;margin-top:14px;padding:12px;text-align:center;border-radius:12px;background:#eef2ff;color:var(--accent);font-weight:600;text-decoration:none}
+  .warn{margin-top:12px;padding:12px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:.9rem}
+  .status{margin-top:18px;font-size:.75rem;color:var(--muted);text-align:center}
+  .err{padding:40px 16px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="name">Loading…</h1><span class="formula" id="formula"></span>
+  <div class="sub" id="sub">VSEPR molecular shapes · drag to rotate, pinch to zoom</div>
+</header>
+
+<div style="position:relative">
+  <model-viewer id="mv" alt="3D molecule model" camera-controls touch-action="pan-y" auto-rotate rotation-per-second="20deg"
+     shadow-intensity="0.8" exposure="1.05" environment-image="neutral"
+     ar ar-modes="scene-viewer quick-look webxr" ar-scale="auto" ar-placement="floor">
+    <button slot="ar-button" class="arbtn">📷 View in my room (AR)</button>
+  </model-viewer>
+</div>
+
+<main>
+  <div class="grid" id="info">
+    <div class="cell"><b>AXE notation</b><span id="axe"></span></div>
+    <div class="cell"><b>Bond pairs / lone pairs</b><span id="pairs"></span></div>
+    <div class="cell"><b>Electron geometry</b><span id="electron"></span></div>
+    <div class="cell quiz"><b>Molecular shape</b><span id="shape"></span></div>
+    <div class="cell quiz" style="grid-column:1/-1"><b>Bond angle</b><span id="angle"></span></div>
+  </div>
+  <button class="reveal" id="reveal" hidden>Tap to reveal the shape</button>
+
+  <div class="legend" id="legend"></div>
+  <a class="arlink" id="androidAR" hidden>Camera didn't open? Tap here to open in Google AR</a>
+  <a class="arlink" id="iosAR" rel="ar" hidden><img alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="1" height="1">Camera didn't open? Tap here for iPhone AR</a>
+  <p class="warn" id="arfail" hidden></p>
+  <p class="status" id="status"></p>
+  <p class="noar" id="noar" hidden>AR isn't available on this device or browser. You can still rotate the 3D model. For AR, open this page on a phone: Chrome on Android, or Safari on iPhone.</p>
+</main>
+
+<script>
+const COL={C:'#404040',H:'#f0f0f0',O:'#e61e1e',N:'#2850e6',F:'#96dc3c',Cl:'#1ebe1e',B:'#ffaa8c',S:'#f0d228',P:'#ff8000',Xe:'#3cb4c8',Br:'#a02323'};
+const EL={C:'Carbon',H:'Hydrogen',O:'Oxygen',N:'Nitrogen',F:'Fluorine',Cl:'Chlorine',B:'Boron',S:'Sulfur',P:'Phosphorus',Xe:'Xenon',Br:'Bromine'};
+const $=i=>document.getElementById(i);
+const p=new URLSearchParams(location.search);
+const id=(p.get('m')||'CH4');
+const quiz=p.get('quiz')==='1';
+fetch('molecules.json').then(r=>r.json()).then(list=>{
+  const m=list.find(x=>x.id.toLowerCase()===id.toLowerCase());
+  if(!m){document.body.innerHTML='<div class="err"><h2>Molecule not found</h2><p>Check the QR code.</p></div>';return}
+  document.title=m.formula+' · Molecule AR';
+  const mv=document.getElementById('mv');
+  mv.src=m.id+'.glb';
+  mv.alt='3D model of '+m.name;
+  $('name').textContent=quiz?'Mystery molecule':m.name;
+  $('formula').textContent=m.formula;
+  $('axe').textContent=m.axe;
+  $('pairs').textContent=m.bondPairs+' bond / '+m.lonePairs+' lone';
+  $('electron').textContent=m.electron;
+  $('shape').textContent=m.shape;
+  $('angle').textContent=m.angle;
+  if(quiz){
+    document.querySelectorAll('.quiz').forEach(c=>c.classList.add('hidden-ans'));
+    const r=document.getElementById('reveal'); r.hidden=false;
+    r.onclick=()=>{document.querySelectorAll('.quiz').forEach(c=>c.classList.remove('hidden-ans'));$('name').textContent=m.name;r.hidden=true};
+  }
+  const els=[m.centre,m.ligand].filter((v,i,a)=>a.indexOf(v)===i);
+  $('legend').innerHTML=els.map(e=>`<span><i class="dot" style="background:${COL[e]}"></i>${EL[e]}</span>`).join('')
+    +(m.lonePairs?`<span><i class="dot" style="background:var(--lp);opacity:.6"></i>Lone pair</span>`:'')
+    +`<span><i class="dot" style="background:#c8c8cd"></i>Bond</span>`;
+  const ua=navigator.userAgent;
+  const isAndroid=/Android/i.test(ua);
+  const inApp=/FBAN|FBAV|Instagram|Line\/|Snapchat|WhatsApp|MicroMessenger|; wv\)|GSA\//i.test(ua);
+  const isIOS=/iPhone|iPad|iPod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const status={model:'checking…',iphone:'checking…',ar:'checking…'};
+  const showStatus=()=>{$('status').textContent='Check: 3D model '+status.model+' · iPhone file '+status.iphone+' · AR '+status.ar+' · v5';};
+  showStatus();
+  // Only use the iPhone file if it really exists, otherwise let the page build one from the .glb
+  fetch(m.id+'.usdz',{method:'HEAD',cache:'no-store'}).then(r=>{
+    if(r.ok){ mv.setAttribute('ios-src',m.id+'.usdz'); status.iphone='OK'; }
+    else status.iphone='missing (auto-converting)';
+  }).catch(()=>{status.iphone='missing (auto-converting)';}).finally(()=>{
+    showStatus();
+    if(isIOS){
+      const a=$('iosAR'); a.hidden=false;
+      if(mv.hasAttribute('ios-src')) a.href=m.id+'.usdz';
+      else { a.removeAttribute('rel'); a.href='#'; a.onclick=e=>{e.preventDefault(); mv.activateAR();}; }
+    }
+  });
+  const glb=new URL(m.id+'.glb',location.href).href;
+  if(isAndroid){
+    const a=$('androidAR');
+    a.href='intent://arvr.google.com/scene-viewer/1.0?file='+encodeURIComponent(glb)+'&mode=ar_preferred&title='+encodeURIComponent(m.name)
+      +'#Intent;scheme=https;package=com.google.android.googlequicksearchbox;action=android.intent.action.VIEW;S.browser_fallback_url='
+      +encodeURIComponent(location.href)+';end;';
+    a.hidden=false;
+  }
+  if(inApp){
+    const w=$('arfail'); w.hidden=false;
+    w.textContent='You opened this inside an app (QR scanner, WhatsApp, Instagram…). AR only works in the real browser: tap ⋮ or ··· and choose "Open in Chrome" (Android) or "Open in Safari" (iPhone).';
+  }
+  mv.addEventListener('ar-status',e=>{
+    if(e.detail.status==='failed'){
+      const w=$('arfail'); w.hidden=false;
+      w.textContent=isAndroid
+        ? 'AR could not start. Install or update "Google Play Services for AR" from the Play Store, then try again, or use the Google AR link.'
+        : 'AR could not start. Make sure you are in Safari and that your iPhone/iPad is iOS 13 or newer.';
+    }
+  });
+  mv.addEventListener('load',()=>{
+    status.model='OK'; status.ar=mv.canActivateAR?'supported':'not supported here'; showStatus();
+    if(!mv.canActivateAR && !isAndroid && !isIOS) $('noar').hidden=false;
+  });
+  mv.addEventListener('error',()=>{status.model='MISSING'; showStatus();});
+});
+</script>
+</body>
+</html>

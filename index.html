@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Molecule AR · QR Cards</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{--ink:#1d2330;--muted:#6b7280;--accent:#4f46e5;--line:#dcd8cf;--bg:#f6f5f1}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+  .bar{padding:20px 16px;max-width:1000px;margin:0 auto}
+  h1{margin:0 0 6px;font-size:1.6rem}
+  p{color:var(--muted);margin:0 0 14px}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:600;font-size:.95rem;cursor:pointer}
+  label{display:flex;gap:6px;align-items:center;font-size:.95rem}
+  .sheet{max-width:1000px;margin:0 auto;padding:0 16px 40px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+  .card{background:#fff;border:1.5px dashed var(--line);border-radius:14px;padding:14px;text-align:center;break-inside:avoid;page-break-inside:avoid}
+  .card .f{font-size:1.5rem;font-weight:800;color:var(--accent)}
+  .card .n{font-size:.95rem;font-weight:600;margin:2px 0 8px}
+  .card .qr{display:flex;justify-content:center;margin:6px 0}
+  .card .qr img,.card .qr canvas{width:150px;height:150px}
+  .card .t{font-size:.75rem;color:var(--muted)}
+  .card a{color:inherit;text-decoration:none}
+  @media print{
+    body{background:#fff}
+    .bar{display:none}
+    .sheet{grid-template-columns:repeat(3,1fr);gap:8mm;padding:0;max-width:none}
+    .card{border-color:#999}
+    @page{size:A4;margin:12mm}
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>Molecule AR · QR cards</h1>
+  <p>Each card opens a 3D molecule. Students tap “View in my room” to place it on the table with their camera. Print this page to get a sheet of cards (3 per row on A4).</p>
+  <div class="controls">
+    <button onclick="print()">🖨️ Print cards</button>
+    <label><input type="checkbox" id="quiz"> Quiz mode (hide the name and shape until students tap reveal)</label>
+  </div>
+</div>
+<div class="sheet" id="sheet"></div>
+<script>
+const base=location.href.replace(/[^/]*([?#].*)?$/,'');
+let list=[];
+function render(){
+  const quiz=document.getElementById('quiz').checked;
+  const sheet=document.getElementById('sheet'); sheet.innerHTML='';
+  list.forEach(m=>{
+    const url=base+'viewer.html?m='+m.id+(quiz?'&quiz=1':'');
+    const c=document.createElement('div'); c.className='card';
+    c.innerHTML=`<a href="${url}"><div class="f">${m.formula}</div>
+      <div class="n">${quiz?'Predict the shape, then scan':m.name}</div><div class="qr"></div>
+      <div class="t">${quiz?'Shape: ________________':m.shape}</div></a>`;
+    sheet.appendChild(c);
+    new QRCode(c.querySelector('.qr'),{text:url,width:300,height:300,correctLevel:QRCode.CorrectLevel.M});
+  });
+}
+document.getElementById('quiz').onchange=render;
+fetch('molecules.json').then(r=>r.json()).then(d=>{list=d;render()});
+</script>
+</body>
+</html>
